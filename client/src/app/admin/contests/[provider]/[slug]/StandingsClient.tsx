@@ -113,13 +113,15 @@ export default function StandingsClient({ data }: { data: UnifiedStandingsRespon
     });
 
     let currentCap = Infinity;
-    const registrationFee = data.contest.registrationFee || 0;
+    const baseFee = data.contest.registrationFee || 0;
+    const registrationFee = Math.min(baseFee, 10000);
 
     rawResults.forEach((res) => {
       const finalPercentage = Math.min(res.percentage, currentCap);
       currentCap = finalPercentage;
 
-      const amount = Math.round((registrationFee * finalPercentage) / 100);
+      const rawAmount = (registrationFee * finalPercentage) / 100;
+      const amount = Math.ceil(rawAmount / 10) * 10;
 
       calcMap.set(res.key, {
         percentage: finalPercentage,
@@ -172,7 +174,7 @@ export default function StandingsClient({ data }: { data: UnifiedStandingsRespon
       'Penalty'
     ];
     if (viewMode === 'sponsorship') {
-      headers.push('Sponsorship', 'Refund');
+      headers.push('Sponsorship', 'Reimbursement');
     }
     data.problems.forEach(p => headers.push(p.label));
     csv += headers.join(',') + '\n';
@@ -329,7 +331,7 @@ export default function StandingsClient({ data }: { data: UnifiedStandingsRespon
                   MCC Sponsored Budget Settings
                 </h2>
                 <p className="text-xs text-slate-500 dark:text-slate-400">
-                  Set the registration fee to calculate and display the sponsored return amounts for MIST teams.
+                  Set the registration fee to calculate and display the sponsored return amounts for MIST teams (capped at a max registration fee of ৳10,000).
                 </p>
               </div>
 
@@ -453,8 +455,8 @@ export default function StandingsClient({ data }: { data: UnifiedStandingsRespon
                     To ensure fairness, an upper-ranked team will never get less reimbursement than a lower-ranked team. For example, if the 1st MIST team ranks 22nd and receives 75%, then the 2nd MIST team (even if they qualified for 100% based on their brackets) will be capped at 75%.
                   </li>
                   <li>
-                    <strong className={isBlackAndWhite ? 'text-slate-900' : 'text-white'}>ICPC World Finals Transport rule:</strong>
-                    If a MIST team successfully qualifies for and enters the ICPC World Finals, all of their transport, lodging, and contest-related expenses will be <strong className="text-emerald-500">100% sponsored</strong> by MCC/MIST (automatically covered, no ranking rules apply).
+                    <strong className={isBlackAndWhite ? 'text-slate-900' : 'text-white'}>International ICPC competition (e.g. World Finals, Super-regional, etc.) Transport rule:</strong>
+                    If a MIST team successfully qualifies for and enters an International ICPC competition (e.g. World Finals, Super-regional, etc.), all of their transport, lodging, and contest-related expenses will be <strong className="text-emerald-500">100% sponsored</strong> by MCC/MIST (automatically covered, no ranking rules apply).
                   </li>
                 </ol>
               </div>
@@ -565,7 +567,7 @@ export default function StandingsClient({ data }: { data: UnifiedStandingsRespon
           if (viewMode === 'sponsorship') {
             const calc = sponsoredCalculation.get(rowKey) || { percentage: 50, amount: 0, mistRank: idx + 1 };
             const pct = calc.percentage;
-            const refundAmount = calc.amount;
+            const reimbursementAmount = calc.amount;
 
             let badgeColorClass = "";
             if (pct >= 200) {
@@ -635,7 +637,7 @@ export default function StandingsClient({ data }: { data: UnifiedStandingsRespon
                     <span className={`text-xl font-black mt-1 ${isBlackAndWhite ? 'text-slate-900' : 'text-white'}`}>{row.score} Solved</span>
                   </div>
 
-                  {/* Right: Sponsorship & Refund Details */}
+                  {/* Right: Sponsorship & Reimbursement Details */}
                   <div className="flex items-center gap-6 lg:pl-6 border-t lg:border-t-0 lg:border-l pt-3 lg:pt-0 border-slate-200/20 lg:border-slate-800/80 justify-between lg:justify-start w-full lg:w-auto">
                     <div className="flex flex-col min-w-[100px]">
                       <span className={`text-[10px] uppercase font-extrabold tracking-wider ${isBlackAndWhite ? 'text-slate-400' : 'text-slate-500'}`}>Sponsorship</span>
@@ -644,9 +646,9 @@ export default function StandingsClient({ data }: { data: UnifiedStandingsRespon
                       </span>
                     </div>
                     <div className="flex flex-col min-w-[120px]">
-                      <span className={`text-[10px] uppercase font-extrabold tracking-wider ${isBlackAndWhite ? 'text-slate-400' : 'text-slate-500'}`}>Refund Amount</span>
+                      <span className={`text-[10px] uppercase font-extrabold tracking-wider ${isBlackAndWhite ? 'text-slate-400' : 'text-slate-500'}`}>Reimbursement</span>
                       <span className={`text-2xl font-black mt-1 tracking-tight ${isBlackAndWhite ? 'text-slate-900' : 'text-blue-400'}`}>
-                        ৳{refundAmount.toLocaleString()} <span className="text-xs font-semibold text-slate-500">TK</span>
+                        ৳{reimbursementAmount.toLocaleString()} <span className="text-xs font-semibold text-slate-500">TK</span>
                       </span>
                     </div>
                   </div>

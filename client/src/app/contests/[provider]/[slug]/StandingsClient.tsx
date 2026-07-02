@@ -10,6 +10,14 @@ export default function StandingsClient({ data }: { data: UnifiedStandingsRespon
   const router = useRouter();
   const [searchTerm, setSearchTerm] = useState('');
   const [mounted, setMounted] = useState(false);
+
+  // --- START TEMPORARY DEMO PATCH ---
+  // A temporary local state for registration fee to allow client-side preview in the demo.
+  // Revert / Rollback: To go back to the database-driven value, delete this feeInput state,
+  // the corresponding input UI block in the return method, and use data.contest.registrationFee directly.
+  const [feeInput, setFeeInput] = useState(data.contest.registrationFee || 0);
+  // --- END TEMPORARY DEMO PATCH ---
+
   const { resolvedTheme } = useTheme();
 
   useEffect(() => {
@@ -104,13 +112,18 @@ export default function StandingsClient({ data }: { data: UnifiedStandingsRespon
     });
 
     let currentCap = Infinity;
-    const registrationFee = data.contest.registrationFee || 0;
+    // --- START TEMPORARY DEMO PATCH ---
+    // Original: const registrationFee = data.contest.registrationFee || 0;
+    const baseFee = feeInput || 0;
+    const registrationFee = Math.min(baseFee, 10000);
+    // --- END TEMPORARY DEMO PATCH ---
 
     rawResults.forEach((res) => {
       const finalPercentage = Math.min(res.percentage, currentCap);
       currentCap = finalPercentage;
 
-      const amount = Math.round((registrationFee * finalPercentage) / 100);
+      const rawAmount = (registrationFee * finalPercentage) / 100;
+      const amount = Math.ceil(rawAmount / 10) * 10;
 
       calcMap.set(res.key, {
         percentage: finalPercentage,
@@ -121,7 +134,10 @@ export default function StandingsClient({ data }: { data: UnifiedStandingsRespon
     });
 
     return calcMap;
-  }, [standingsWithUniqueRank, rulesConfig, data.contest.registrationFee]);
+    // --- START TEMPORARY DEMO PATCH ---
+    // Original: [standingsWithUniqueRank, rulesConfig, data.contest.registrationFee]
+  }, [standingsWithUniqueRank, rulesConfig, feeInput]);
+    // --- END TEMPORARY DEMO PATCH ---
 
   // Reset pagination count when filters or views change
   useEffect(() => {
@@ -163,7 +179,7 @@ export default function StandingsClient({ data }: { data: UnifiedStandingsRespon
       'Penalty'
     ];
     if (viewMode === 'sponsorship') {
-      headers.push('Sponsorship', 'Refund');
+      headers.push('Sponsorship', 'Reimbursement');
     }
     data.problems.forEach(p => headers.push(p.label));
     csv += headers.join(',') + '\n';
@@ -232,35 +248,84 @@ export default function StandingsClient({ data }: { data: UnifiedStandingsRespon
       {/* Registration Fee Information (If configured) & Rules Accordion */}
       {viewMode === 'sponsorship' && (
         <>
-          {data.contest.registrationFee > 0 && (
-            <div className={`mb-6 p-6 rounded-2xl border transition-all duration-300 ${isBlackAndWhite
-                ? 'bg-white border-slate-200 text-slate-800 shadow-sm'
-                : 'bg-slate-900/60 backdrop-blur-md border-slate-800/85 text-slate-350 shadow-lg'
-              }`}>
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-                <div>
-                  <h2 className={`text-lg font-bold tracking-tight mb-1 ${isBlackAndWhite ? 'text-slate-900' : 'text-white'}`}>
-                    MCC Sponsored Budget Information
-                  </h2>
-                  <p className="text-xs text-slate-500 dark:text-slate-400">
-                    Participation in this contest is sponsored by MCC. Below are the calculated return budgets based on team rankings.
-                  </p>
-                </div>
-
-                <div className={`flex items-center gap-3 px-5 py-3 rounded-2xl border ${isBlackAndWhite
-                    ? 'bg-slate-50 border-slate-200 text-slate-900'
-                    : 'bg-slate-950 border-slate-850 text-white'
+          {/* --- START TEMPORARY DEMO PATCH --- */}
+          {/*
+              Original Code (Database-Driven registrationFee view):
+              
+              {data.contest.registrationFee > 0 && (
+                <div className={`mb-6 p-6 rounded-2xl border transition-all duration-300 ${isBlackAndWhite
+                    ? 'bg-white border-slate-200 text-slate-800 shadow-sm'
+                    : 'bg-slate-900/60 backdrop-blur-md border-slate-800/85 text-slate-350 shadow-lg'
                   }`}>
-                  <div className="flex flex-col">
-                    <span className={`text-[10px] uppercase font-bold tracking-wider ${isBlackAndWhite ? 'text-slate-400' : 'text-slate-500'}`}>Registration Fee</span>
-                    <span className={`text-xl font-black mt-0.5 ${isBlackAndWhite ? 'text-slate-900' : 'text-blue-400'}`}>
-                      ৳{data.contest.registrationFee.toLocaleString()} TK
-                    </span>
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                    <div>
+                      <h2 className={`text-lg font-bold tracking-tight mb-1 ${isBlackAndWhite ? 'text-slate-900' : 'text-white'}`}>
+                        MCC Sponsored Budget Information
+                      </h2>
+                      <p className="text-xs text-slate-500 dark:text-slate-400">
+                        Participation in this contest is sponsored by MCC. Below are the calculated return budgets based on team rankings.
+                      </p>
+                    </div>
+
+                    <div className={`flex items-center gap-3 px-5 py-3 rounded-2xl border ${isBlackAndWhite
+                        ? 'bg-slate-50 border-slate-200 text-slate-900'
+                        : 'bg-slate-950 border-slate-850 text-white'
+                      }`}>
+                      <div className="flex flex-col">
+                        <span className={`text-[10px] uppercase font-bold tracking-wider ${isBlackAndWhite ? 'text-slate-400' : 'text-slate-500'}`}>Registration Fee</span>
+                        <span className={`text-xl font-black mt-0.5 ${isBlackAndWhite ? 'text-slate-900' : 'text-blue-400'}`}>
+                          ৳{data.contest.registrationFee.toLocaleString()} TK
+                        </span>
+                      </div>
+                    </div>
                   </div>
+                </div>
+              )}
+
+              Revert / Rollback: To revert back to the database value, delete the interactive input container below, 
+              uncomment the original code block above, and delete the feeInput state variable.
+          */}
+
+          <div className={`mb-6 p-6 rounded-2xl border transition-all duration-300 ${
+            isBlackAndWhite 
+              ? 'bg-white border-slate-200 text-slate-800 shadow-sm' 
+              : 'bg-slate-900/60 backdrop-blur-md border-slate-800/85 text-slate-350 shadow-lg'
+          }`}>
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-6">
+              <div>
+                <h2 className={`text-lg font-bold tracking-tight mb-1 ${isBlackAndWhite ? 'text-slate-900' : 'text-white'}`}>
+                  MCC Sponsored Budget Information (Demo Mode)
+                </h2>
+                <p className="text-xs text-slate-500 dark:text-slate-400">
+                  Adjust the registration fee below to dynamically preview the sponsorship reimbursement details on this page (capped at a max registration fee of ৳10,000).
+                </p>
+              </div>
+
+              <div className="flex items-center gap-3 w-full sm:w-auto">
+                <div className="relative flex-1 sm:w-48">
+                  <span className={`absolute left-4 top-1/2 -translate-y-1/2 text-sm font-semibold ${isBlackAndWhite ? 'text-slate-500' : 'text-slate-450'}`}>
+                    ৳
+                  </span>
+                  <input
+                    type="number"
+                    min="0"
+                    placeholder="Registration Fee"
+                    value={feeInput || ''}
+                    onChange={(e) => setFeeInput(parseInt(e.target.value, 10) || 0)}
+                    className={`w-full pl-9 pr-12 py-2.5 border rounded-xl outline-none transition-all text-sm font-semibold ${
+                      isBlackAndWhite 
+                        ? 'bg-slate-50 border-slate-350 text-slate-900 focus:ring-2 focus:ring-slate-100' 
+                        : 'bg-slate-950 border-slate-850 text-white focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500/50'
+                    }`}
+                  />
+                  <span className={`absolute right-4 top-1/2 -translate-y-1/2 text-xs font-semibold ${isBlackAndWhite ? 'text-slate-500' : 'text-slate-450'}`}>
+                    TK
+                  </span>
                 </div>
               </div>
             </div>
-          )}
+          </div>
+          {/* --- END TEMPORARY DEMO PATCH --- */}
 
           {/* Expandable Rules Accordion */}
           <div className={`mb-6 rounded-2xl border overflow-hidden transition-all duration-300 ${isBlackAndWhite
@@ -324,8 +389,8 @@ export default function StandingsClient({ data }: { data: UnifiedStandingsRespon
                     To ensure fairness, an upper-ranked team will never get less reimbursement than a lower-ranked team. For example, if the 1st MIST team ranks 22nd and receives 75%, then the 2nd MIST team (even if they qualified for 100% based on their brackets) will be capped at 75%.
                   </li>
                   <li>
-                    <strong className={isBlackAndWhite ? 'text-slate-900' : 'text-white'}>ICPC World Finals Transport rule:</strong>
-                    If a MIST team successfully qualifies for and enters the ICPC World Finals, all of their transport, lodging, and contest-related expenses will be <strong className="text-emerald-500">100% sponsored</strong> by MCC/MIST (automatically covered, no ranking rules apply).
+                    <strong className={isBlackAndWhite ? 'text-slate-900' : 'text-white'}>International ICPC competition (e.g. World Finals, Super-regional, etc.) Transport rule:</strong>
+                    If a MIST team successfully qualifies for and enters an International ICPC competition (e.g. World Finals, Super-regional, etc.), all of their transport, lodging, and contest-related expenses will be <strong className="text-emerald-500">100% sponsored</strong> by MCC/MIST (automatically covered, no ranking rules apply).
                   </li>
                 </ol>
               </div>
@@ -436,7 +501,7 @@ export default function StandingsClient({ data }: { data: UnifiedStandingsRespon
           if (viewMode === 'sponsorship') {
             const calc = sponsoredCalculation.get(rowKey) || { percentage: 50, amount: 0, mistRank: idx + 1 };
             const pct = calc.percentage;
-            const refundAmount = calc.amount;
+            const reimbursementAmount = calc.amount;
 
             let badgeColorClass = "";
             if (pct >= 200) {
@@ -506,7 +571,7 @@ export default function StandingsClient({ data }: { data: UnifiedStandingsRespon
                     <span className={`text-xl font-black mt-1 ${isBlackAndWhite ? 'text-slate-900' : 'text-white'}`}>{row.score} Solved</span>
                   </div>
 
-                  {/* Right: Sponsorship & Refund Details */}
+                  {/* Right: Sponsorship & Reimbursement Details */}
                   <div className="flex items-center gap-6 lg:pl-6 border-t lg:border-t-0 lg:border-l pt-3 lg:pt-0 border-slate-200/20 lg:border-slate-800/80 justify-between lg:justify-start w-full lg:w-auto">
                     <div className="flex flex-col min-w-[100px]">
                       <span className={`text-[10px] uppercase font-extrabold tracking-wider ${isBlackAndWhite ? 'text-slate-400' : 'text-slate-500'}`}>Sponsorship</span>
@@ -515,9 +580,9 @@ export default function StandingsClient({ data }: { data: UnifiedStandingsRespon
                       </span>
                     </div>
                     <div className="flex flex-col min-w-[120px]">
-                      <span className={`text-[10px] uppercase font-extrabold tracking-wider ${isBlackAndWhite ? 'text-slate-400' : 'text-slate-500'}`}>Refund Amount</span>
+                      <span className={`text-[10px] uppercase font-extrabold tracking-wider ${isBlackAndWhite ? 'text-slate-400' : 'text-slate-500'}`}>Reimbursement</span>
                       <span className={`text-2xl font-black mt-1 tracking-tight ${isBlackAndWhite ? 'text-slate-900' : 'text-blue-400'}`}>
-                        ৳{refundAmount.toLocaleString()} <span className="text-xs font-semibold text-slate-500">TK</span>
+                        ৳{reimbursementAmount.toLocaleString()} <span className="text-xs font-semibold text-slate-500">TK</span>
                       </span>
                     </div>
                   </div>

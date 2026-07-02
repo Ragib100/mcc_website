@@ -240,7 +240,91 @@ export default function StandingsClient({ data }: { data: UnifiedStandingsRespon
     document.body.removeChild(link);
   };
 
+  const renderRuleCell = (rankRange: string, pct: number) => {
+    let cellClass = "";
+    
+    if (pct >= 200) {
+      cellClass = isBlackAndWhite
+        ? "bg-emerald-50/50 border-emerald-200 text-emerald-800"
+        : "bg-emerald-950/20 border-emerald-500/20 text-emerald-400 hover:border-emerald-500/40";
+    } else if (pct >= 150) {
+      cellClass = isBlackAndWhite
+        ? "bg-teal-50/50 border-teal-200 text-teal-800"
+        : "bg-teal-950/20 border-teal-500/20 text-teal-400 hover:border-teal-500/40";
+    } else if (pct > 100) { // 125%
+      cellClass = isBlackAndWhite
+        ? "bg-blue-50/50 border-blue-200 text-blue-800"
+        : "bg-blue-950/20 border-blue-500/20 text-blue-400 hover:border-blue-500/40";
+    } else if (pct === 100) {
+      cellClass = isBlackAndWhite
+        ? "bg-indigo-50 border-indigo-200 text-indigo-855"
+        : "bg-indigo-950/20 border-indigo-500/20 text-indigo-300 hover:border-indigo-500/40";
+    } else if (pct === 75) {
+      cellClass = isBlackAndWhite
+        ? "bg-amber-50 border-amber-250 text-amber-800"
+        : "bg-amber-500/10 border-amber-500/20 text-amber-400 hover:border-amber-500/30";
+    } else {
+      cellClass = isBlackAndWhite
+        ? "bg-slate-50 border-slate-200 text-slate-700"
+        : "bg-slate-900/40 border-slate-800/80 text-slate-400 hover:border-slate-700/40";
+    }
+    
+    return (
+      <div className={`flex flex-col items-center justify-center p-3 border rounded-xl transition-all duration-300 min-h-[64px] ${cellClass}`}>
+        <span className="text-xs font-black">{rankRange}</span>
+      </div>
+    );
+  };
 
+  const renderGridCell = (pct: number) => {
+    const isBonus = pct > 100;
+    const bonusPct = pct - 100;
+    
+    let cellClass = "";
+    let badgeClass = "";
+    
+    if (pct >= 200) {
+      cellClass = isBlackAndWhite
+        ? "bg-emerald-50/50 border-emerald-200 text-emerald-800"
+        : "bg-emerald-950/20 border-emerald-500/20 text-white hover:border-emerald-500/40";
+      badgeClass = isBlackAndWhite
+        ? "bg-emerald-100 text-emerald-800 border-emerald-200"
+        : "bg-emerald-500/20 text-emerald-400 border-emerald-500/30";
+    } else if (pct >= 150) {
+      cellClass = isBlackAndWhite
+        ? "bg-teal-50/50 border-teal-200 text-teal-800"
+        : "bg-teal-950/20 border-teal-500/20 text-white hover:border-teal-500/40";
+      badgeClass = isBlackAndWhite
+        ? "bg-teal-100 text-teal-800 border-teal-200"
+        : "bg-teal-500/20 text-teal-400 border-teal-500/30";
+    } else if (pct > 100) { // e.g. 125%
+      cellClass = isBlackAndWhite
+        ? "bg-blue-50/50 border-blue-200 text-blue-800"
+        : "bg-blue-950/20 border-blue-500/20 text-white hover:border-blue-500/40";
+      badgeClass = isBlackAndWhite
+        ? "bg-blue-100 text-blue-800 border-blue-200"
+        : "bg-blue-500/20 text-blue-400 border-blue-500/30";
+    } else {
+      cellClass = isBlackAndWhite
+        ? "bg-slate-50 border-slate-200 text-slate-700"
+        : "bg-slate-900/40 border-slate-800/80 text-slate-300 hover:border-slate-700/40";
+    }
+    
+    return (
+      <div className={`flex flex-col items-center justify-center p-3 border rounded-xl transition-all duration-300 min-h-[76px] ${cellClass}`}>
+        {isBonus ? (
+          <>
+            <span className="text-sm font-medium opacity-85">100%</span>
+            <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-md border mt-1 select-none whitespace-nowrap uppercase tracking-wider ${badgeClass}`}>
+              +{bonusPct}% Bonus
+            </span>
+          </>
+        ) : (
+          <span className="text-lg font-black">{pct}%</span>
+        )}
+      </div>
+    );
+  };
 
   return (
     <div className="transition-colors duration-300">
@@ -369,20 +453,101 @@ export default function StandingsClient({ data }: { data: UnifiedStandingsRespon
                   </li>
                   <li>
                     <strong className={isBlackAndWhite ? 'text-slate-900' : 'text-white'}>Return Percentage Brackets:</strong>
-                    <ul className="list-disc pl-5 mt-1.5 space-y-1.5">
-                      <li>
-                        <strong>1st MIST Team:</strong>
-                        Gets 200% return if unique rank is 1st; 150% if in top 5; 125% if in top 10; 100% if in top 20; 75% if in top 25; otherwise 50% by default.
-                      </li>
-                      <li>
-                        <strong>2nd & 3rd MIST Teams:</strong>
-                        Get 200% return if unique rank is top 2; 150% if in top 10; 125% if in top 20; 100% if in top 30; 75% if in top 35; otherwise 50% by default.
-                      </li>
-                      <li>
-                        <strong>4th or Lower MIST Teams:</strong>
-                        Get 200% return if unique rank is top 3; 150% if in top 15; 125% if in top 30; 100% if in top 40; 75% if in top 45; otherwise 50% by default.
-                      </li>
-                    </ul>
+                    {/* Visual Return Bracket Grid Matrix (7 Columns to match JSON rules exactly) */}
+                    <div className="overflow-x-auto pb-2 mt-3">
+                      <div className="min-w-[850px] grid grid-cols-7 gap-2.5 mb-2">
+                        {/* Headers */}
+                        <div className={`flex flex-col items-center justify-center p-2.5 border rounded-xl ${
+                          isBlackAndWhite ? 'border-slate-350 bg-slate-100 text-slate-855' : 'border-slate-800/80 bg-slate-950 text-slate-400'
+                        }`}>
+                          <span className="text-[9px] uppercase font-extrabold tracking-wider text-center opacity-65">Y-AXIS</span>
+                          <span className="text-[11px] font-extrabold text-center">Team Tier</span>
+                        </div>
+                        
+                        <div className={`flex flex-col items-center justify-center p-2.5 border rounded-xl ${
+                          isBlackAndWhite ? 'border-slate-350 bg-slate-100 text-slate-855' : 'border-slate-800/80 bg-slate-950 text-slate-400'
+                        }`}>
+                          <span className="text-[9px] uppercase font-extrabold tracking-wider text-center text-emerald-450">100% Base</span>
+                          <span className="text-[11px] font-extrabold text-center text-emerald-400">+100% Bonus</span>
+                        </div>
+
+                        <div className={`flex flex-col items-center justify-center p-2.5 border rounded-xl ${
+                          isBlackAndWhite ? 'border-slate-350 bg-slate-100 text-slate-855' : 'border-slate-800/80 bg-slate-950 text-slate-400'
+                        }`}>
+                          <span className="text-[9px] uppercase font-extrabold tracking-wider text-center text-teal-450">100% Base</span>
+                          <span className="text-[11px] font-extrabold text-center text-teal-400">+50% Bonus</span>
+                        </div>
+
+                        <div className={`flex flex-col items-center justify-center p-2.5 border rounded-xl ${
+                          isBlackAndWhite ? 'border-slate-350 bg-slate-100 text-slate-855' : 'border-slate-800/80 bg-slate-950 text-slate-400'
+                        }`}>
+                          <span className="text-[9px] uppercase font-extrabold tracking-wider text-center text-blue-450">100% Base</span>
+                          <span className="text-[11px] font-extrabold text-center text-blue-400">+25% Bonus</span>
+                        </div>
+
+                        <div className={`flex flex-col items-center justify-center p-2.5 border rounded-xl ${
+                          isBlackAndWhite ? 'border-slate-350 bg-slate-100 text-slate-855' : 'border-slate-800/80 bg-slate-950 text-slate-400'
+                        }`}>
+                          <span className="text-[9px] uppercase font-extrabold tracking-wider text-center text-indigo-400">100% Base</span>
+                          <span className="text-[11px] font-extrabold text-center">Reimbursement</span>
+                        </div>
+
+                        <div className={`flex flex-col items-center justify-center p-2.5 border rounded-xl ${
+                          isBlackAndWhite ? 'border-slate-350 bg-slate-100 text-slate-855' : 'border-slate-800/80 bg-slate-950 text-slate-400'
+                        }`}>
+                          <span className="text-[9px] uppercase font-extrabold tracking-wider text-center text-amber-500">75%</span>
+                          <span className="text-[11px] font-extrabold text-center">Reimbursement</span>
+                        </div>
+
+                        <div className={`flex flex-col items-center justify-center p-2.5 border rounded-xl ${
+                          isBlackAndWhite ? 'border-slate-350 bg-slate-100 text-slate-855' : 'border-slate-800/80 bg-slate-950 text-slate-450'
+                        }`}>
+                          <span className="text-[9px] uppercase font-extrabold tracking-wider text-center text-slate-500">50%</span>
+                          <span className="text-[11px] font-extrabold text-center">Default</span>
+                        </div>
+
+                        {/* Row 1: 1st MIST */}
+                        <div className={`flex flex-col items-center justify-center p-2.5 border rounded-xl font-bold text-xs ${
+                          isBlackAndWhite ? 'bg-slate-100/50 border-slate-350 text-slate-855' : 'bg-slate-950/40 border-slate-800/80 text-white'
+                        }`}>
+                          <span>1st MIST</span>
+                        </div>
+                        {renderRuleCell("Rank 1", 200)}
+                        {renderRuleCell("Rank 2-5", 150)}
+                        {renderRuleCell("Rank 6-10", 125)}
+                        {renderRuleCell("Rank 11-20", 100)}
+                        {renderRuleCell("Rank 21-25", 75)}
+                        {renderRuleCell("Rank 26+", 50)}
+
+                        {/* Row 2: 2nd & 3rd MIST */}
+                        <div className={`flex flex-col items-center justify-center p-2.5 border rounded-xl text-center font-bold text-xs ${
+                          isBlackAndWhite ? 'bg-slate-100/50 border-slate-350 text-slate-855' : 'bg-slate-950/40 border-slate-800/80 text-white'
+                        }`}>
+                          <span>2nd & 3rd</span>
+                          <span className="text-[8px] font-medium opacity-65 mt-0.5 uppercase tracking-wider">MIST Teams</span>
+                        </div>
+                        {renderRuleCell("Rank 1-2", 200)}
+                        {renderRuleCell("Rank 3-10", 150)}
+                        {renderRuleCell("Rank 11-20", 125)}
+                        {renderRuleCell("Rank 21-30", 100)}
+                        {renderRuleCell("Rank 31-35", 75)}
+                        {renderRuleCell("Rank 36+", 50)}
+
+                        {/* Row 3: 4th+ MIST */}
+                        <div className={`flex flex-col items-center justify-center p-2.5 border rounded-xl text-center font-bold text-xs ${
+                          isBlackAndWhite ? 'bg-slate-100/50 border-slate-350 text-slate-855' : 'bg-slate-950/40 border-slate-800/80 text-white'
+                        }`}>
+                          <span>4th+</span>
+                          <span className="text-[8px] font-medium opacity-65 mt-0.5 uppercase tracking-wider">MIST Teams</span>
+                        </div>
+                        {renderRuleCell("Rank 1-3", 200)}
+                        {renderRuleCell("Rank 4-15", 150)}
+                        {renderRuleCell("Rank 16-30", 125)}
+                        {renderRuleCell("Rank 31-40", 100)}
+                        {renderRuleCell("Rank 41-45", 75)}
+                        {renderRuleCell("Rank 46+", 50)}
+                      </div>
+                    </div>
                   </li>
                   <li>
                     <strong className={isBlackAndWhite ? 'text-slate-900' : 'text-white'}>The Capping Rule (Fairness Cap):</strong>
@@ -395,6 +560,10 @@ export default function StandingsClient({ data }: { data: UnifiedStandingsRespon
                   <li>
                     <strong className={isBlackAndWhite ? 'text-slate-900' : 'text-white'}>Registration Fee Capping Rule:</strong>
                     The registration fee used for calculating sponsorship return amounts is capped at a maximum of <strong className={isBlackAndWhite ? 'text-slate-900' : 'text-white'}>৳10,000</strong>. If the registration fee is higher than this amount, the reimbursement calculations are still performed as if the fee is exactly ৳10,000.
+                  </li>
+                  <li>
+                    <strong className={isBlackAndWhite ? 'text-slate-900' : 'text-white'}>Reimbursement Rounding Rule:</strong>
+                    Calculated reimbursement amounts are rounded up (ceiled) to the nearest <strong className={isBlackAndWhite ? 'text-slate-900' : 'text-white'}>৳10</strong> for cleaner distribution (e.g., a calculated ৳2,502 reimbursement is adjusted to ৳2,510).
                   </li>
                 </ol>
               </div>
@@ -579,9 +748,17 @@ export default function StandingsClient({ data }: { data: UnifiedStandingsRespon
                   <div className="flex items-center gap-6 lg:pl-6 border-t lg:border-t-0 lg:border-l pt-3 lg:pt-0 border-slate-200/20 lg:border-slate-800/80 justify-between lg:justify-start w-full lg:w-auto">
                     <div className="flex flex-col min-w-[100px]">
                       <span className={`text-[10px] uppercase font-extrabold tracking-wider ${isBlackAndWhite ? 'text-slate-400' : 'text-slate-500'}`}>Sponsorship</span>
-                      <span className={`inline-flex items-center justify-center px-3 py-1 rounded-xl text-sm font-extrabold border mt-1 w-max ${badgeColorClass}`}>
-                        {pct}% Cover
-                      </span>
+                      {pct > 100 ? (
+                        <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-xl text-[11px] font-extrabold border mt-1 w-max ${badgeColorClass}`}>
+                          <span>100% Base</span>
+                          <span className="opacity-40">•</span>
+                          <span className="uppercase text-[9px] font-black">+{pct - 100}% Bonus</span>
+                        </span>
+                      ) : (
+                        <span className={`inline-flex items-center justify-center px-3 py-1 rounded-xl text-sm font-extrabold border mt-1 w-max ${badgeColorClass}`}>
+                          {pct}% Cover
+                        </span>
+                      )}
                     </div>
                     <div className="flex flex-col min-w-[120px]">
                       <span className={`text-[10px] uppercase font-extrabold tracking-wider ${isBlackAndWhite ? 'text-slate-400' : 'text-slate-500'}`}>Reimbursement</span>

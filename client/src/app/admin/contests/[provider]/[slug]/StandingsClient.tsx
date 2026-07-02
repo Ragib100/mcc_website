@@ -458,6 +458,10 @@ export default function StandingsClient({ data }: { data: UnifiedStandingsRespon
                     <strong className={isBlackAndWhite ? 'text-slate-900' : 'text-white'}>International ICPC competition (e.g. World Finals, Super-regional, etc.) Transport rule:</strong>
                     If a MIST team successfully qualifies for and enters an International ICPC competition (e.g. World Finals, Super-regional, etc.), all of their transport, lodging, and contest-related expenses will be <strong className="text-emerald-500">100% sponsored</strong> by MCC/MIST (automatically covered, no ranking rules apply).
                   </li>
+                  <li>
+                    <strong className={isBlackAndWhite ? 'text-slate-900' : 'text-white'}>Registration Fee Capping Rule:</strong>
+                    The registration fee used for calculating sponsorship return amounts is capped at a maximum of <strong className={isBlackAndWhite ? 'text-slate-900' : 'text-white'}>৳10,000</strong>. If the registration fee is higher than this amount, the reimbursement calculations are still performed as if the fee is exactly ৳10,000.
+                  </li>
                 </ol>
               </div>
             )}

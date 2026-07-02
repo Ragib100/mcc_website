@@ -4,18 +4,43 @@ import { useState, useMemo, useEffect, useRef, Fragment } from 'react';
 import { useRouter } from 'next/navigation';
 import { UnifiedStandingsResponse, UnifiedStandingsRow, isMistTeam } from '@/lib/data-sources/unified';
 import { Search, Download, Users, Info, Shield, AlertTriangle, Database, RefreshCw, CheckCircle, ExternalLink } from 'lucide-react';
-import { saveContestStandings, deleteSavedStandings } from '@/actions/contest';
+import { useTheme } from 'next-themes';
+import { saveContestStandings, deleteSavedStandings, updateContestRegistrationFee } from '@/actions/contest';
 
 export default function StandingsClient({ data }: { data: UnifiedStandingsResponse }) {
   const router = useRouter();
   const [isSaving, setIsSaving] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
+  const [mounted, setMounted] = useState(false);
+  const { resolvedTheme } = useTheme();
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  const isBlackAndWhite = mounted && resolvedTheme === 'light';
   const [searchTerm, setSearchTerm] = useState('');
-  const [viewMode, setViewMode] = useState<'standard' | 'mist'>('standard');
+  const [viewMode, setViewMode] = useState<'standard' | 'mist' | 'sponsorship'>('standard');
   const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
 
   const [displayCount, setDisplayCount] = useState(50);
   const sentinelRef = useRef<HTMLDivElement>(null);
+
+  const [feeInput, setFeeInput] = useState(data.contest.registrationFee || 0);
+  const [isUpdatingFee, setIsUpdatingFee] = useState(false);
+  const [rulesConfig, setRulesConfig] = useState<any>(null);
+  const [isRulesExpanded, setIsRulesExpanded] = useState(false);
+
+  useEffect(() => {
+    fetch('/sponsored-rules.json')
+      .then((res) => res.json())
+      .then((config) => setRulesConfig(config))
+      .catch((err) => console.error('Failed to load sponsored rules config', err));
+  }, []);
+
+  useEffect(() => {
+    setFeeInput(data.contest.registrationFee || 0);
+  }, [data.contest.registrationFee]);
 
   const toggleExpandRow = (key: string) => {
     const newExpanded = new Set(expandedRows);
@@ -28,28 +53,84 @@ export default function StandingsClient({ data }: { data: UnifiedStandingsRespon
   };
 
   const standingsWithUniqueRank = useMemo(() => {
-    const seenUniversities = new Set<string>();
-    return data.standings.map((row) => {
-      if (row.institution) {
-        seenUniversities.add(row.institution.trim().toLowerCase());
-      }
+    return data.standings.map((row, idx) => {
       return {
         ...row,
-        uniqueUniRank: seenUniversities.size
+        uniqueUniRank: idx + 1
       };
     });
   }, [data.standings]);
 
   const filteredStandings = useMemo(() => {
     let list = standingsWithUniqueRank;
-    if (viewMode === 'mist') {
+    if (viewMode === 'mist' || viewMode === 'sponsorship') {
       list = list.filter(row => isMistTeam(row.teamName, row.institution));
     }
-    return list.filter(row => 
-      row.teamName.toLowerCase().includes(searchTerm.toLowerCase()) || 
+    return list.filter(row =>
+      row.teamName.toLowerCase().includes(searchTerm.toLowerCase()) ||
       row.institution.toLowerCase().includes(searchTerm.toLowerCase())
     );
   }, [standingsWithUniqueRank, searchTerm, viewMode]);
+
+  const sponsoredCalculation = useMemo(() => {
+    if (!rulesConfig || !rulesConfig.rules) return new Map<string, any>();
+
+    const calcMap = new Map<string, any>();
+
+    const mistTeams = standingsWithUniqueRank
+      .map((row) => ({ row, uniqueRank: row.uniqueUniRank }))
+      .filter(item => isMistTeam(item.row.teamName, item.row.institution));
+
+    const rawResults = mistTeams.map((item, idx) => {
+      const mistRank = idx + 1;
+      const uniqueRank = item.uniqueRank;
+
+      let matchedRule = rulesConfig.rules.find((r: any) => {
+        if (Array.isArray(r.mistRanks)) {
+          return r.mistRanks.includes(mistRank);
+        } else if (typeof r.mistRanks === 'string' && r.mistRanks.endsWith('+')) {
+          const limit = parseInt(r.mistRanks.slice(0, -1), 10);
+          return mistRank >= limit;
+        }
+        return false;
+      });
+
+      let percentage = matchedRule ? matchedRule.defaultPercentage : 50;
+
+      if (matchedRule && matchedRule.brackets) {
+        const bracket = matchedRule.brackets.find((b: any) => uniqueRank <= b.limit);
+        if (bracket) {
+          percentage = bracket.percentage;
+        }
+      }
+
+      return {
+        key: item.row.teamName + item.row.institution,
+        mistRank,
+        uniqueRank,
+        percentage
+      };
+    });
+
+    let currentCap = Infinity;
+    const registrationFee = data.contest.registrationFee || 0;
+
+    rawResults.forEach((res) => {
+      const finalPercentage = Math.min(res.percentage, currentCap);
+      currentCap = finalPercentage;
+
+      const amount = Math.round((registrationFee * finalPercentage) / 100);
+
+      calcMap.set(res.key, {
+        percentage: finalPercentage,
+        amount,
+        mistRank: res.mistRank,
+        uniqueRank: res.uniqueRank
+      });
+    });
+
+    return calcMap;
+  }, [standingsWithUniqueRank, rulesConfig, data.contest.registrationFee]);
 
   // Reset pagination count when filters or views change
   useEffect(() => {
@@ -82,19 +163,36 @@ export default function StandingsClient({ data }: { data: UnifiedStandingsRespon
 
   const downloadCSV = () => {
     let csv = '';
-    
-    const headers = [viewMode === 'mist' ? 'Unique University Rank' : 'Rank', 'Team', 'Institution', 'Score', 'Penalty'];
+
+    const headers = [
+      viewMode === 'mist' || viewMode === 'sponsorship' ? 'Unique University Rank' : 'Rank',
+      'Team',
+      'Institution',
+      'Score',
+      'Penalty'
+    ];
+    if (viewMode === 'sponsorship') {
+      headers.push('Sponsorship', 'Refund');
+    }
     data.problems.forEach(p => headers.push(p.label));
     csv += headers.join(',') + '\n';
 
     filteredStandings.forEach((row, i) => {
       const rowData = [
-        viewMode === 'mist' ? row.uniqueUniRank : row.displayRank,
+        viewMode === 'mist' || viewMode === 'sponsorship' ? row.uniqueUniRank : row.displayRank,
         `"${row.teamName.replace(/"/g, '""')}"`,
         `"${row.institution.replace(/"/g, '""')}"`,
         row.score,
         row.penalty
       ];
+      if (viewMode === 'sponsorship') {
+        const rowKey = row.teamName + row.institution;
+        const pct = sponsoredCalculation.has(rowKey) ? `${sponsoredCalculation.get(rowKey)!.percentage}%` : '50%';
+        const amt = sponsoredCalculation.has(rowKey) && data.contest.registrationFee
+          ? `৳${sponsoredCalculation.get(rowKey)!.amount}`
+          : '৳0';
+        rowData.push(`"${pct}"`, `"${amt}"`);
+      }
       data.problems.forEach(p => {
         const stat = row.problems.find(pr => pr.label === p.label);
         if (!stat) rowData.push('');
@@ -171,15 +269,15 @@ export default function StandingsClient({ data }: { data: UnifiedStandingsRespon
   };
 
   return (
-    <div>
+    <div className="transition-colors duration-300">
       {/* DB Saved Status Banner */}
       <div className="mb-6">
         {!data.isSaved ? (
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-4 rounded-2xl bg-amber-500/10 border border-amber-500/20 text-amber-300">
+          <div className={`flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-4 rounded-2xl border ${isBlackAndWhite ? 'bg-amber-50 border-amber-200 text-amber-800' : 'bg-amber-500/10 border-amber-500/20 text-amber-300'}`}>
             <div className="flex items-start sm:items-center gap-3">
-              <AlertTriangle className="h-5 w-5 shrink-0 text-amber-500" />
+              <AlertTriangle className={`h-5 w-5 shrink-0 ${isBlackAndWhite ? 'text-amber-600' : 'text-amber-500'}`} />
               <div className="text-xs sm:text-sm">
-                <span className="font-bold text-white">Warning:</span> This standings page is not saved in the database yet. Live crawler data might expire or become invalid.
+                <span className={`font-bold ${isBlackAndWhite ? 'text-amber-900' : 'text-white'}`}>Warning:</span> This standings page is not saved in the database yet. Live crawler data might expire or become invalid.
               </div>
             </div>
             <button
@@ -192,11 +290,11 @@ export default function StandingsClient({ data }: { data: UnifiedStandingsRespon
             </button>
           </div>
         ) : (
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-4 rounded-2xl bg-slate-900/60 border border-slate-800 text-slate-300">
+          <div className={`flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-4 rounded-2xl border ${isBlackAndWhite ? 'bg-slate-50 border-slate-200 text-slate-700' : 'bg-slate-900/60 border-slate-800 text-slate-300'}`}>
             <div className="flex items-start sm:items-center gap-3">
-              <CheckCircle className="h-5 w-5 shrink-0 text-emerald-500" />
+              <CheckCircle className={`h-5 w-5 shrink-0 ${isBlackAndWhite ? 'text-slate-900' : 'text-emerald-500'}`} />
               <div className="text-xs sm:text-sm">
-                <span className="font-bold text-white">Saved in Database:</span> This standings page is safely archived. Saved on {data.savedAt ? new Date(data.savedAt).toLocaleString('en-US', {
+                <span className={`font-bold ${isBlackAndWhite ? 'text-slate-900' : 'text-white'}`}>Saved in Database:</span> This standings page is safely archived. Saved on {data.savedAt ? new Date(data.savedAt).toLocaleString('en-US', {
                   month: 'short',
                   day: 'numeric',
                   year: 'numeric',
@@ -209,7 +307,7 @@ export default function StandingsClient({ data }: { data: UnifiedStandingsRespon
             <button
               onClick={handleResyncLive}
               disabled={isSyncing}
-              className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold uppercase tracking-wider bg-slate-800 hover:bg-slate-700 disabled:bg-slate-700/50 text-slate-300 transition-all border border-slate-700 whitespace-nowrap self-end sm:self-auto"
+              className={`flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold uppercase tracking-wider transition-all whitespace-nowrap self-end sm:self-auto ${isBlackAndWhite ? 'bg-slate-100 hover:bg-slate-200 text-slate-850 border border-slate-350/80' : 'bg-slate-800 hover:bg-slate-700 disabled:bg-slate-700/50 text-slate-300 border border-slate-700'}`}
             >
               <RefreshCw className={`h-3.5 w-3.5 ${isSyncing ? 'animate-spin' : ''}`} />
               {isSyncing ? 'Syncing...' : 'Re-sync with Live'}
@@ -218,20 +316,167 @@ export default function StandingsClient({ data }: { data: UnifiedStandingsRespon
         )}
       </div>
 
+      {/* MCC Sponsored Budget Settings (Admin Only) & Rules Accordion */}
+      {viewMode === 'sponsorship' && (
+        <>
+          <div className={`mb-6 p-6 rounded-2xl border transition-all duration-300 ${isBlackAndWhite
+            ? 'bg-white border-slate-200 text-slate-800 shadow-sm'
+            : 'bg-slate-900/60 backdrop-blur-md border-slate-800/85 text-slate-350 shadow-lg'
+            }`}>
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
+              <div>
+                <h2 className={`text-lg font-bold tracking-tight mb-1 ${isBlackAndWhite ? 'text-slate-900' : 'text-white'}`}>
+                  MCC Sponsored Budget Settings
+                </h2>
+                <p className="text-xs text-slate-500 dark:text-slate-400">
+                  Set the registration fee to calculate and display the sponsored return amounts for MIST teams.
+                </p>
+              </div>
+
+              <div className="flex items-center gap-3 w-full md:w-auto">
+                <div className="relative flex-1 md:w-48">
+                  <span className={`absolute left-4 top-1/2 -translate-y-1/2 text-sm font-semibold ${isBlackAndWhite ? 'text-slate-500' : 'text-slate-450'}`}>
+                    ৳
+                  </span>
+                  <input
+                    type="number"
+                    min="0"
+                    placeholder="Registration Fee"
+                    value={feeInput || ''}
+                    onChange={(e) => setFeeInput(parseInt(e.target.value, 10) || 0)}
+                    disabled={!data.isSaved || isUpdatingFee}
+                    className={`w-full pl-9 pr-12 py-2.5 border rounded-xl outline-none transition-all text-sm font-semibold ${isBlackAndWhite
+                      ? 'bg-slate-50 border-slate-350 text-slate-900 focus:ring-2 focus:ring-slate-100'
+                      : 'bg-slate-950 border-slate-850 text-white focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500/50'
+                      } disabled:opacity-50 disabled:cursor-not-allowed`}
+                  />
+                  <span className={`absolute right-4 top-1/2 -translate-y-1/2 text-xs font-semibold ${isBlackAndWhite ? 'text-slate-500' : 'text-slate-450'}`}>
+                    TK
+                  </span>
+                </div>
+
+                <button
+                  onClick={async () => {
+                    if (!data.isSaved) return;
+                    setIsUpdatingFee(true);
+                    try {
+                      const res = await updateContestRegistrationFee(data.contest.provider, data.contest.slug, feeInput);
+                      if (res.success) {
+                        router.refresh();
+                      } else {
+                        alert(res.message);
+                      }
+                    } catch (err: any) {
+                      alert(err.message || 'Failed to update registration fee');
+                    } finally {
+                      setIsUpdatingFee(false);
+                    }
+                  }}
+                  disabled={!data.isSaved || isUpdatingFee}
+                  className={`px-5 py-2.5 rounded-xl text-xs font-bold uppercase tracking-wider transition-all whitespace-nowrap ${isBlackAndWhite
+                    ? 'bg-slate-950 hover:bg-slate-900 disabled:bg-slate-400 text-white shadow-md'
+                    : 'bg-blue-600 hover:bg-blue-700 disabled:bg-blue-700/50 text-white shadow-md shadow-blue-600/10'
+                    } disabled:cursor-not-allowed`}
+                >
+                  {isUpdatingFee ? 'Saving...' : 'Save Fee'}
+                </button>
+              </div>
+            </div>
+
+            {!data.isSaved && (
+              <div className="mt-3 text-xs text-amber-600 dark:text-amber-400 font-medium flex items-center gap-1.5 animate-pulse">
+                <AlertTriangle className="h-3.5 w-3.5" />
+                Please save this standings page to the database first to enable setting the registration fee.
+              </div>
+            )}
+          </div>
+
+          {/* Expandable Rules Accordion */}
+          <div className={`mb-6 rounded-2xl border overflow-hidden transition-all duration-300 ${isBlackAndWhite
+            ? 'bg-slate-50 border-slate-200'
+            : 'bg-slate-900/35 border-slate-800/80'
+            }`}>
+            <button
+              onClick={() => setIsRulesExpanded(!isRulesExpanded)}
+              className={`w-full flex items-center justify-between p-4 text-left font-bold text-sm transition-all ${isBlackAndWhite
+                ? 'hover:bg-slate-100/50 text-slate-850'
+                : 'hover:bg-slate-800/20 text-slate-200'
+                }`}
+            >
+              <div className="flex items-center gap-2">
+                <Info className={`h-4 w-4 ${isBlackAndWhite ? 'text-slate-600' : 'text-blue-400'}`} />
+                <span>MCC Sponsored Budget Rules </span>
+              </div>
+              <span className="text-xs text-slate-500 font-normal">
+                {isRulesExpanded ? 'Hide Rules ▲' : 'Show Rules ▼'}
+              </span>
+            </button>
+
+            {isRulesExpanded && (
+              <div className={`p-5 border-t text-xs space-y-4 leading-relaxed ${isBlackAndWhite
+                ? 'border-slate-200 text-slate-650 bg-white'
+                : 'border-slate-800/60 text-slate-350 bg-slate-950/30'
+                }`}>
+                <p>
+                  MCC automatically sponsors the registration fees for MIST teams based on their rank in the standings.
+                  Here is how it is calculated step-by-step:
+                </p>
+
+                <ol className="list-decimal pl-5 space-y-3">
+                  <li>
+                    <strong className={isBlackAndWhite ? 'text-slate-900' : 'text-white'}>Unique University Rank:</strong>
+                    Ranks are calculated after filtering out secondary teams from other universities. Only the top team of other universities is counted, but <strong className={isBlackAndWhite ? 'text-slate-900' : 'text-white'}>all MIST teams are kept</strong>, each getting their own unique university rank slot.
+                  </li>
+                  <li>
+                    <strong className={isBlackAndWhite ? 'text-slate-900' : 'text-white'}>MIST-Relative Rank:</strong>
+                    MIST teams are ranked relative to each other based on their order in the standings (e.g. 1st MIST team, 2nd MIST team, etc.).
+                  </li>
+                  <li>
+                    <strong className={isBlackAndWhite ? 'text-slate-900' : 'text-white'}>Return Percentage Brackets:</strong>
+                    <ul className="list-disc pl-5 mt-1.5 space-y-1.5">
+                      <li>
+                        <strong>1st MIST Team:</strong>
+                        Gets 200% return if unique rank is 1st; 150% if in top 5; 125% if in top 10; 100% if in top 20; 75% if in top 25; otherwise 50% by default.
+                      </li>
+                      <li>
+                        <strong>2nd & 3rd MIST Teams:</strong>
+                        Get 200% return if unique rank is top 2; 150% if in top 10; 125% if in top 20; 100% if in top 30; 75% if in top 35; otherwise 50% by default.
+                      </li>
+                      <li>
+                        <strong>4th or Lower MIST Teams:</strong>
+                        Get 200% return if unique rank is top 3; 150% if in top 15; 125% if in top 30; 100% if in top 40; 75% if in top 45; otherwise 50% by default.
+                      </li>
+                    </ul>
+                  </li>
+                  <li>
+                    <strong className={isBlackAndWhite ? 'text-slate-900' : 'text-white'}>The Capping Rule (Fairness Cap):</strong>
+                    To ensure fairness, an upper-ranked team will never get less reimbursement than a lower-ranked team. For example, if the 1st MIST team ranks 22nd and receives 75%, then the 2nd MIST team (even if they qualified for 100% based on their brackets) will be capped at 75%.
+                  </li>
+                  <li>
+                    <strong className={isBlackAndWhite ? 'text-slate-900' : 'text-white'}>ICPC World Finals Transport rule:</strong>
+                    If a MIST team successfully qualifies for and enters the ICPC World Finals, all of their transport, lodging, and contest-related expenses will be <strong className="text-emerald-500">100% sponsored</strong> by MCC/MIST (automatically covered, no ranking rules apply).
+                  </li>
+                </ol>
+              </div>
+            )}
+          </div>
+        </>
+      )}
+
       {/* Actual Standings Link */}
-      <div className="mb-6 flex items-center justify-between p-4 rounded-2xl bg-slate-900/40 border border-slate-800/80 text-slate-300">
+      <div className={`mb-6 flex items-center justify-between p-4 rounded-2xl border ${isBlackAndWhite ? 'bg-slate-50 border-slate-200 text-slate-700' : 'bg-slate-900/40 border-slate-800/80 text-slate-300'}`}>
         <div className="flex items-center gap-3">
-          <ExternalLink className="h-5 w-5 text-blue-400 shrink-0" />
-          <div className="text-xs sm:text-sm text-slate-300">
+          <ExternalLink className={`h-5 w-5 shrink-0 ${isBlackAndWhite ? 'text-slate-900' : 'text-blue-400'}`} />
+          <div className="text-xs sm:text-sm">
             You can view the original standings page on{' '}
-            <a 
-              href={data.contest.provider === 'baps' 
-                ? `https://bapsoj.org/contests/${data.contest.slug}` 
+            <a
+              href={data.contest.provider === 'baps'
+                ? `https://bapsoj.org/contests/${data.contest.slug}`
                 : `https://toph.co/c/${data.contest.slug}/standings`
               }
               target="_blank"
               rel="noopener noreferrer"
-              className="font-semibold text-blue-400 hover:text-blue-300 underline transition-colors"
+              className={`font-semibold underline transition-colors ${isBlackAndWhite ? 'text-slate-900 hover:text-slate-800' : 'text-blue-400 hover:text-blue-300'}`}
             >
               {data.contest.provider === 'baps' ? 'BAPS OJ' : 'Toph'}
             </a>.
@@ -240,42 +485,65 @@ export default function StandingsClient({ data }: { data: UnifiedStandingsRespon
       </div>
       {/* Controls Area */}
       <div className="flex flex-col md:flex-row justify-between items-center gap-4 mb-8">
-        <div className="flex bg-slate-900 border border-slate-800 p-1.5 rounded-2xl w-full md:w-auto flex-wrap">
+        <div className={`flex border p-1.5 rounded-2xl w-full md:w-auto flex-wrap ${isBlackAndWhite ? 'bg-slate-100 border-slate-200' : 'bg-slate-900 border-slate-800'}`}>
           <button
             onClick={() => setViewMode('standard')}
-            className={`flex-1 md:flex-none px-5 py-2.5 rounded-xl text-sm font-semibold transition-all ${
-              viewMode === 'standard' 
-                ? 'bg-slate-800 text-white shadow-lg shadow-slate-950/20' 
+            className={`flex-1 md:flex-none px-5 py-2.5 rounded-xl text-sm font-semibold transition-all ${viewMode === 'standard'
+              ? isBlackAndWhite
+                ? 'bg-white text-slate-950 shadow-md shadow-slate-200/80'
+                : 'bg-slate-800 text-white shadow-lg shadow-slate-950/20'
+              : isBlackAndWhite
+                ? 'text-slate-500 hover:text-slate-900'
                 : 'text-slate-400 hover:text-slate-200'
-            }`}
+              }`}
           >
             Standard Standings
           </button>
 
           <button
             onClick={() => setViewMode('mist')}
-            className={`flex-1 md:flex-none px-5 py-2.5 rounded-xl text-sm font-semibold transition-all ${
-              viewMode === 'mist' 
-                ? 'bg-slate-800 text-white shadow-lg shadow-slate-950/20' 
+            className={`flex-1 md:flex-none px-5 py-2.5 rounded-xl text-sm font-semibold transition-all ${viewMode === 'mist'
+              ? isBlackAndWhite
+                ? 'bg-white text-slate-950 shadow-md shadow-slate-200/80'
+                : 'bg-slate-800 text-white shadow-lg shadow-slate-950/20'
+              : isBlackAndWhite
+                ? 'text-slate-500 hover:text-slate-900'
                 : 'text-slate-400 hover:text-slate-200'
-            }`}
+              }`}
           >
             MIST Performance
+          </button>
+
+          <button
+            onClick={() => setViewMode('sponsorship')}
+            className={`flex-1 md:flex-none px-5 py-2.5 rounded-xl text-sm font-semibold transition-all ${viewMode === 'sponsorship'
+              ? isBlackAndWhite
+                ? 'bg-white text-slate-950 shadow-md shadow-slate-200/80'
+                : 'bg-slate-800 text-white shadow-lg shadow-slate-950/20'
+              : isBlackAndWhite
+                ? 'text-slate-500 hover:text-slate-900'
+                : 'text-slate-400 hover:text-slate-200'
+              }`}
+          >
+            Sponsorship
           </button>
         </div>
 
         <div className="flex flex-col sm:flex-row items-center gap-4 w-full md:w-auto">
           <div className="relative w-full sm:flex-1 md:w-72">
-            <Search className="absolute left-4 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-500" />
-            <input 
-              type="text" 
-              placeholder="Search Team or University..." 
+            <Search className={`absolute left-4 top-1/2 -translate-y-1/2 h-4 w-4 ${isBlackAndWhite ? 'text-slate-400' : 'text-slate-500'}`} />
+            <input
+              type="text"
+              placeholder="Search Team or University..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full pl-11 pr-4 py-3 bg-slate-900 border border-slate-800/80 rounded-2xl text-white placeholder-slate-500 focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500/50 outline-none transition-all text-sm"
+              className={`w-full pl-11 pr-4 py-3 border rounded-2xl outline-none transition-all text-sm ${isBlackAndWhite
+                ? 'bg-white border-slate-350 text-slate-900 placeholder-slate-400 focus:ring-2 focus:ring-slate-100 focus:border-slate-400'
+                : 'bg-slate-900 border-slate-800/80 text-white placeholder-slate-500 focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500/50'
+                }`}
             />
           </div>
-          <button 
+          <button
             onClick={downloadCSV}
             className="w-full sm:w-auto flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-5 py-3 rounded-2xl text-sm font-semibold transition-all shadow-lg shadow-blue-600/10 hover:shadow-blue-600/20"
           >
@@ -287,172 +555,269 @@ export default function StandingsClient({ data }: { data: UnifiedStandingsRespon
 
       {/* Cards List Area */}
       <div className="space-y-4">
-        {viewMode === 'standard' || viewMode === 'mist' ? (
-          visibleStandings.map((row, idx) => {
-            const rowKey = row.teamName + row.institution;
-            const isExpanded = expandedRows.has(rowKey);
-            const hasSkipped = row.skippedTeams && row.skippedTeams.length > 0;
+        {visibleStandings.map((row, idx) => {
+          const rowKey = row.teamName + row.institution;
+          const isExpanded = expandedRows.has(rowKey);
+          const hasSkipped = row.skippedTeams && row.skippedTeams.length > 0;
 
-            const isMist = isMistTeam(row.teamName, row.institution);
+          const isMist = isMistTeam(row.teamName, row.institution);
 
-            const isEven = idx % 2 === 0;
-             const rowClass = isMist 
-              ? 'border-slate-500/50 bg-slate-400 hover:bg-slate-400/80 shadow-md shadow-white/5' 
-              : isEven
-                ? 'border-slate-800/80 bg-slate-800/45 hover:border-slate-700/60 hover:bg-slate-800/65'
-                : 'border-slate-800/40 bg-slate-900/40 hover:border-slate-750 hover:bg-slate-900/60';
+          if (viewMode === 'sponsorship') {
+            const calc = sponsoredCalculation.get(rowKey) || { percentage: 50, amount: 0, mistRank: idx + 1 };
+            const pct = calc.percentage;
+            const refundAmount = calc.amount;
+
+            let badgeColorClass = "";
+            if (pct >= 200) {
+              badgeColorClass = isBlackAndWhite
+                ? "bg-emerald-100 text-emerald-800 border-emerald-300"
+                : "bg-emerald-500/10 text-emerald-400 border-emerald-500/30 shadow-[0_0_12px_rgba(16,185,129,0.15)]";
+            } else if (pct >= 125) {
+              badgeColorClass = isBlackAndWhite
+                ? "bg-blue-100 text-blue-800 border-blue-300"
+                : "bg-blue-500/10 text-blue-400 border-blue-500/30 shadow-[0_0_12px_rgba(59,130,246,0.15)]";
+            } else if (pct >= 100) {
+              badgeColorClass = isBlackAndWhite
+                ? "bg-indigo-100 text-indigo-800 border-indigo-300"
+                : "bg-indigo-500/10 text-indigo-400 border-indigo-500/30 shadow-[0_0_12px_rgba(99,102,241,0.15)]";
+            } else if (pct >= 75) {
+              badgeColorClass = isBlackAndWhite
+                ? "bg-amber-100 text-amber-800 border-amber-300"
+                : "bg-amber-500/10 text-amber-400 border-amber-500/30 shadow-[0_0_12px_rgba(245,158,11,0.15)]";
+            } else {
+              badgeColorClass = isBlackAndWhite
+                ? "bg-slate-100 text-slate-700 border-slate-350"
+                : "bg-slate-500/10 text-slate-400 border-slate-500/30";
+            }
+
+            const cardClass = isBlackAndWhite
+              ? 'border-slate-350 bg-slate-100/60 hover:bg-slate-200/40 shadow-sm'
+              : 'border-slate-500/30 bg-slate-900/60 hover:bg-slate-900/80 hover:border-slate-700/60 shadow-lg';
 
             return (
-              <div 
-                key={idx} 
-                className={`flex flex-col p-5 border rounded-2xl transition-all duration-300 ${rowClass}`}
+              <div
+                key={rowKey}
+                className={`flex flex-col p-5 border rounded-2xl transition-all duration-300 ${cardClass}`}
               >
-                {/* Main Row Content wrapper */}
-                <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 w-full">
-                  {/* Left section: Rank */}
-                  {(!isMist || viewMode === 'mist') && (
-                    <div className="flex lg:flex-col items-center lg:items-center justify-between lg:justify-center pr-0 lg:pr-6 border-b lg:border-b-0 lg:border-r border-slate-700/50 pb-3 lg:pb-0 min-w-[120px]">
-                      <span className="text-[10px] uppercase font-bold text-slate-500 tracking-wider text-center">
-                        {viewMode === 'mist' ? 'Unique University Rank' : 'Rank'}
-                      </span>
-                      <span className="text-2xl font-black mt-0.5 lg:mt-1 text-white">
-                        {viewMode === 'mist' ? row.uniqueUniRank : row.displayRank}
-                      </span>
-                    </div>
-                  )}
+                <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6 w-full">
+                  {/* Left: Rank Indicators */}
+                  <div className="flex lg:flex-col items-start lg:items-center justify-between lg:justify-center min-w-[140px] pr-0 lg:pr-6 border-b lg:border-b-0 lg:border-r pb-3 lg:pb-0 border-slate-200/20 lg:border-slate-800/80">
+                    <span className={`text-[10px] uppercase font-bold tracking-wider text-center ${isBlackAndWhite ? 'text-slate-400' : 'text-slate-500'}`}>
+                      Unique University Rank
+                    </span>
+                    <span className={`text-2xl font-black mt-0.5 lg:mt-1 ${isBlackAndWhite ? 'text-slate-900' : 'text-white'}`}>
+                      {row.uniqueUniRank}
+                    </span>
+                    <span className={`text-[10px] font-semibold mt-1 opacity-80 ${isBlackAndWhite ? 'text-slate-500' : 'text-slate-400'}`}>
+                      Overall Rank: #{row.originalRank}
+                    </span>
+                  </div>
 
-                  {/* Team Details Section */}
-                  <div className={`flex-1 min-w-[220px] ${isMist && viewMode !== 'mist' ? 'lg:min-w-[366px] lg:max-w-[406px]' : 'lg:min-w-[280px] lg:max-w-[320px]'}`}>
+                  {/* Middle Left: Team & University Details */}
+                  <div className="flex-1 min-w-[220px]">
                     <div className="flex items-center gap-2.5 flex-wrap">
-                      <span className={`text-lg font-bold break-words whitespace-normal ${isMist ? 'text-slate-950' : 'text-white'}`}>
+                      <span className={`text-lg font-bold ${isBlackAndWhite ? 'text-slate-900' : 'text-white'}`}>
                         {row.institution || 'Unknown'}
                       </span>
-                      {isMist && (
-                        <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[9px] font-bold uppercase tracking-wider bg-violet-100 text-violet-700 border border-violet-200/60">
-                          <Shield className="h-2.5 w-2.5 fill-violet-700/20" />
-                          MIST
-                        </span>
-                      )}
-                      {hasSkipped && (
-                        <button
-                          onClick={() => toggleExpandRow(rowKey)}
-                          className={`p-1 rounded-full border transition-all ${
-                            isExpanded 
-                              ? 'bg-blue-500/20 border-blue-500/40 text-blue-600' 
-                              : isMist
-                                ? 'bg-slate-100 border-slate-200 text-slate-500 hover:text-blue-600 hover:bg-slate-200 hover:border-blue-300'
-                                : 'bg-slate-700/40 border-slate-700/60 text-slate-400 hover:text-blue-400 hover:border-blue-500/30'
-                          }`}
-                          title={`Show ${row.skippedTeams.length} other team(s) from this university`}
-                        >
-                          <Info className="h-3.5 w-3.5" />
-                        </button>
-                      )}
+                      <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[9px] font-bold uppercase tracking-wider ${isBlackAndWhite ? 'bg-slate-950 text-white' : 'bg-violet-500/10 text-violet-400 border border-violet-500/20'}`}>
+                        <Shield className="h-2.5 w-2.5 fill-current opacity-80" />
+                        MIST
+                      </span>
                     </div>
-                    <div className={`text-xs mt-1 truncate ${isMist ? 'text-slate-600 font-medium' : 'text-slate-400'}`}>
+                    <div className={`text-xs mt-1 truncate ${isBlackAndWhite ? 'text-slate-500 font-medium' : 'text-slate-450'}`}>
                       {row.teamName}
                     </div>
                   </div>
 
-                  {/* Score & Penalty Section */}
-                  <div className={`flex items-center gap-8 px-0 lg:px-8 py-2 lg:py-0 border-t border-b lg:border-t-0 lg:border-b-0 lg:border-r lg:border-l justify-around lg:justify-start ${isMist ? 'border-slate-200' : 'border-slate-700/50'}`}>
-                    <div className="flex flex-col">
-                      <span className={`text-[10px] uppercase font-extrabold tracking-wider ${isMist ? 'text-white' : 'text-slate-500'}`}>Score</span>
-                      <span className={`text-xl font-black mt-0.5 ${isMist ? 'text-slate-950' : 'text-white'}`}>{row.score}</span>
-                    </div>
-                    <div className="flex flex-col">
-                      <span className={`text-[10px] uppercase font-extrabold tracking-wider ${isMist ? 'text-white' : 'text-slate-500'}`}>Penalty</span>
-                      <span className={`text-xl font-extrabold mt-0.5 ${isMist ? 'text-slate-700' : 'text-slate-300'}`}>{row.penalty}</span>
-                    </div>
-                    {isMist && viewMode !== 'mist' && (
-                      <div className="flex flex-col">
-                        <span className="text-[10px] uppercase font-extrabold text-white tracking-wider">Rank</span>
-                        <span className="text-xl font-black mt-0.5 text-slate-950">{row.originalRank}</span>
-                      </div>
-                    )}
+                  {/* Middle Right: Performance Score (Solved count only) */}
+                  <div className="flex flex-col min-w-[90px] justify-center">
+                    <span className={`text-[10px] uppercase font-extrabold tracking-wider ${isBlackAndWhite ? 'text-slate-400' : 'text-slate-500'}`}>Score</span>
+                    <span className={`text-xl font-black mt-1 ${isBlackAndWhite ? 'text-slate-900' : 'text-white'}`}>{row.score} Solved</span>
                   </div>
 
-                  {/* Problems Badges Section */}
-                  <div className="w-full lg:flex-1 min-w-0 flex items-center gap-2 overflow-x-auto py-1 pl-0 lg:pl-4 no-scrollbar">
-                    {data.problems.map(p => {
-                      const stat = row.problems.find(pr => pr.label === p.label);
-                      let statusClass = "bg-slate-800/80 text-slate-400 border border-slate-700/30";
-                      let attemptsText = "-";
-                      
-                      if (stat) {
-                        if (stat.solved) {
-                          statusClass = "bg-emerald-500 text-slate-950 font-extrabold";
-                          attemptsText = `${stat.tries}/${stat.penalty}`;
-                        } else if (stat.tries > 0) {
-                          statusClass = "bg-red-500/90 text-white font-extrabold";
-                          attemptsText = data.contest.provider === 'toph' ? 'X' : `-${stat.tries}`;
-                        }
-                      }
+                  {/* Right: Sponsorship & Refund Details */}
+                  <div className="flex items-center gap-6 lg:pl-6 border-t lg:border-t-0 lg:border-l pt-3 lg:pt-0 border-slate-200/20 lg:border-slate-800/80 justify-between lg:justify-start w-full lg:w-auto">
+                    <div className="flex flex-col min-w-[100px]">
+                      <span className={`text-[10px] uppercase font-extrabold tracking-wider ${isBlackAndWhite ? 'text-slate-400' : 'text-slate-500'}`}>Sponsorship</span>
+                      <span className={`inline-flex items-center justify-center px-3 py-1 rounded-xl text-sm font-extrabold border mt-1 w-max ${badgeColorClass}`}>
+                        {pct}% Cover
+                      </span>
+                    </div>
+                    <div className="flex flex-col min-w-[120px]">
+                      <span className={`text-[10px] uppercase font-extrabold tracking-wider ${isBlackAndWhite ? 'text-slate-400' : 'text-slate-500'}`}>Refund Amount</span>
+                      <span className={`text-2xl font-black mt-1 tracking-tight ${isBlackAndWhite ? 'text-slate-900' : 'text-blue-400'}`}>
+                        ৳{refundAmount.toLocaleString()} <span className="text-xs font-semibold text-slate-500">TK</span>
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            );
+          }
 
-                      return (
-                        <div 
-                          key={p.label} 
-                          className={`flex flex-col items-center justify-center w-12 h-12 rounded-xl text-center shadow-sm select-none transition-all ${statusClass}`}
-                          title={`${p.title} ${stat ? (stat.solved ? '(Solved)' : '(Attempted)') : '(Unattempted)'}`}
-                        >
-                          <span className="text-[11px] font-extrabold uppercase leading-none">{p.label}</span>
-                          <span className="text-[9px] font-bold mt-1 opacity-90 leading-none">{attemptsText}</span>
-                        </div>
-                      );
-                    })}
+          const isEven = idx % 2 === 0;
+          const rowClass = isBlackAndWhite
+            ? isMist
+              ? 'border-slate-350 bg-slate-100/60 hover:bg-slate-200/40 shadow-sm'
+              : 'border-slate-200 bg-white hover:border-slate-300 hover:bg-slate-50/20 shadow-sm'
+            : isMist
+              ? 'border-slate-500/50 bg-slate-400 hover:bg-slate-400/80 shadow-md shadow-white/5'
+              : isEven
+                ? 'border-slate-800/80 bg-slate-800/45 hover:border-slate-700/60 hover:bg-slate-800/65'
+                : 'border-slate-800/40 bg-slate-900/40 hover:border-slate-750 hover:bg-slate-900/60';
+
+          return (
+            <div
+              key={idx}
+              className={`flex flex-col p-5 border rounded-2xl transition-all duration-300 ${rowClass}`}
+            >
+              {/* Main Row Content wrapper */}
+              <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 w-full">
+                {/* Left section: Rank */}
+                <div className={`flex lg:flex-col items-center lg:items-center justify-between lg:justify-center pr-0 lg:pr-6 border-b lg:border-b-0 lg:border-r pb-3 lg:pb-0 min-w-[120px] ${isBlackAndWhite ? 'border-slate-200' : 'border-slate-700/50'}`}>
+                  <span className={`text-[10px] uppercase font-bold tracking-wider text-center ${isBlackAndWhite ? 'text-slate-400' : 'text-slate-500'}`}>
+                    {viewMode === 'mist' ? 'Unique University Rank' : 'Rank'}
+                  </span>
+                  <span className={`text-2xl font-black mt-0.5 lg:mt-1 ${isBlackAndWhite ? 'text-slate-900' : 'text-white'}`}>
+                    {viewMode === 'mist' ? row.uniqueUniRank : row.displayRank}
+                  </span>
+                </div>
+
+                {/* Team Details Section */}
+                <div className="flex-1 min-w-[220px] lg:min-w-[366px] lg:max-w-[406px]">
+                  <div className="flex items-center gap-2.5 flex-wrap">
+                    <span className={`text-lg font-bold break-words whitespace-normal ${isBlackAndWhite ? 'text-slate-900' : isMist ? 'text-slate-950' : 'text-white'}`}>
+                      {row.institution || 'Unknown'}
+                    </span>
+                    {isMist && (
+                      <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[9px] font-bold uppercase tracking-wider ${isBlackAndWhite ? 'bg-slate-950 text-white border border-slate-950' : 'bg-violet-100 text-violet-700 border border-violet-200/60'}`}>
+                        <Shield className="h-2.5 w-2.5 fill-current opacity-80" />
+                        MIST
+                      </span>
+                    )}
+                    {hasSkipped && (
+                      <button
+                        onClick={() => toggleExpandRow(rowKey)}
+                        className={`p-1 rounded-full border transition-all ${isExpanded
+                          ? isBlackAndWhite
+                            ? 'bg-slate-100 border-slate-350 text-slate-900'
+                            : 'bg-blue-500/20 border-blue-500/40 text-blue-600'
+                          : isBlackAndWhite
+                            ? 'bg-slate-50 border-slate-200 text-slate-400 hover:text-slate-900 hover:bg-slate-100'
+                            : isMist
+                              ? 'bg-slate-100 border-slate-200 text-slate-500 hover:text-blue-600 hover:bg-slate-200 hover:border-blue-300'
+                              : 'bg-slate-700/40 border-slate-700/60 text-slate-400 hover:text-blue-400 hover:border-blue-500/30'
+                          }`}
+                        title={`Show ${row.skippedTeams.length} other team(s) from this university`}
+                      >
+                        <Info className="h-3.5 w-3.5" />
+                      </button>
+                    )}
+                  </div>
+                  <div className={`text-xs mt-1 truncate ${isBlackAndWhite ? 'text-slate-500 font-medium' : isMist ? 'text-slate-600 font-medium' : 'text-slate-400'}`}>
+                    {row.teamName}
                   </div>
                 </div>
 
-                {/* Skipped Teams expandable panel (sitting at full width inside the vertical stack) */}
-                {hasSkipped && isExpanded && (
-                  <div className="w-full mt-4 pt-4 border-t border-slate-700/50 bg-slate-900/35 rounded-b-xl p-4">
-                    <div className="text-xs font-semibold text-slate-400 mb-3 flex justify-between">
-                      <span>Other teams from {row.institution}</span>
-                      <span className="font-normal text-slate-500">{row.skippedTeams.length} skipped team(s)</span>
-                    </div>
-                    <div className="overflow-x-auto">
-                      <table className="w-full text-left text-xs border-collapse">
-                        <thead>
-                          <tr className="border-b border-slate-800 text-slate-500">
-                            <th className="px-4 py-2 font-medium">Team Name</th>
-                            <th className="px-4 py-2 font-medium text-center">Score</th>
-                            <th className="px-4 py-2 font-medium text-center">Penalty</th>
-                            <th className="px-4 py-2 font-medium text-right">Original Rank</th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-slate-800/40">
-                          {row.skippedTeams.map((sTeam, sIdx) => (
-                            <tr key={sIdx} className="hover:bg-slate-800/20 transition-colors text-slate-300">
-                              <td className="px-4 py-2 font-semibold">{sTeam.teamName}</td>
-                              <td className="px-4 py-2 text-center font-bold text-white">{sTeam.score}</td>
-                              <td className="px-4 py-2 text-center">{sTeam.penalty}</td>
-                              <td className="px-4 py-2 text-right text-slate-500">#{sTeam.originalRank}</td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
+                {/* Score & Penalty Section */}
+                <div className={`flex items-center gap-8 px-0 lg:px-8 py-2 lg:py-0 border-t border-b lg:border-t-0 lg:border-b-0 lg:border-r lg:border-l justify-around lg:justify-start ${isBlackAndWhite ? 'border-slate-200' : isMist ? 'border-slate-200' : 'border-slate-700/50'}`}>
+                  <div className="flex flex-col">
+                    <span className={`text-[10px] uppercase font-extrabold tracking-wider ${isBlackAndWhite ? 'text-slate-400' : isMist ? 'text-white' : 'text-slate-500'}`}>Score</span>
+                    <span className={`text-xl font-black mt-0.5 ${isBlackAndWhite ? 'text-slate-900' : isMist ? 'text-slate-950' : 'text-white'}`}>{row.score}</span>
                   </div>
-                )}
+                  <div className="flex flex-col">
+                    <span className={`text-[10px] uppercase font-extrabold tracking-wider ${isBlackAndWhite ? 'text-slate-400' : isMist ? 'text-white' : 'text-slate-500'}`}>Penalty</span>
+                    <span className={`text-xl font-extrabold mt-0.5 ${isBlackAndWhite ? 'text-slate-650' : isMist ? 'text-slate-700' : 'text-slate-300'}`}>{row.penalty}</span>
+                  </div>
+                </div>
+
+                {/* Problems Badges Section */}
+                <div className="w-full lg:flex-1 min-w-0 flex items-center gap-2 overflow-x-auto py-1 pl-0 lg:pl-4 no-scrollbar">
+                  {data.problems.map(p => {
+                    const stat = row.problems.find(pr => pr.label === p.label);
+                    let statusClass = isBlackAndWhite
+                      ? "bg-white text-slate-300 border border-slate-200"
+                      : "bg-slate-800/80 text-slate-400 border border-slate-700/30";
+                    let attemptsText = "-";
+
+                    if (stat) {
+                      if (stat.solved) {
+                        statusClass = isBlackAndWhite
+                          ? "bg-slate-950 text-white font-extrabold border border-slate-950"
+                          : "bg-emerald-500 text-slate-950 font-extrabold";
+                        attemptsText = `${stat.tries}/${stat.penalty}`;
+                      } else if (stat.tries > 0) {
+                        statusClass = isBlackAndWhite
+                          ? "bg-white text-slate-400 font-medium border border-slate-300 line-through"
+                          : "bg-red-500/90 text-white font-extrabold";
+                        attemptsText = data.contest.provider === 'toph' ? 'X' : `-${stat.tries}`;
+                      }
+                    }
+
+                    return (
+                      <div
+                        key={p.label}
+                        className={`flex flex-col items-center justify-center w-12 h-12 rounded-xl text-center shadow-sm select-none transition-all ${statusClass}`}
+                        title={`${p.title} ${stat ? (stat.solved ? '(Solved)' : '(Attempted)') : '(Unattempted)'}`}
+                      >
+                        <span className="text-[11px] font-extrabold uppercase leading-none">{p.label}</span>
+                        <span className="text-[9px] font-bold mt-1 opacity-90 leading-none">{attemptsText}</span>
+                      </div>
+                    );
+                  })}
+                </div>
               </div>
-            );
-          })
-        ) : null}
+
+              {/* Skipped Teams expandable panel (sitting at full width inside the vertical stack) */}
+              {hasSkipped && isExpanded && (
+                <div className={`w-full mt-4 pt-4 border-t p-4 rounded-b-xl ${isBlackAndWhite ? 'bg-slate-50 border-slate-200' : 'bg-slate-900/35 border-slate-700/50'}`}>
+                  <div className={`text-xs font-semibold mb-3 flex justify-between ${isBlackAndWhite ? 'text-slate-400' : 'text-slate-400'}`}>
+                    <span>Other teams from {row.institution}</span>
+                    <span className="font-normal text-slate-500">{row.skippedTeams.length} skipped team(s)</span>
+                  </div>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left text-xs border-collapse">
+                      <thead>
+                        <tr className={`border-b ${isBlackAndWhite ? 'border-slate-200 text-slate-400' : 'border-slate-800 text-slate-500'}`}>
+                          <th className="px-4 py-2 font-medium">Team Name</th>
+                          <th className="px-4 py-2 font-medium text-center">Score</th>
+                          <th className="px-4 py-2 font-medium text-center">Penalty</th>
+                          <th className="px-4 py-2 font-medium text-right">Original Rank</th>
+                        </tr>
+                      </thead>
+                      <tbody className={`divide-y ${isBlackAndWhite ? 'divide-slate-200/60' : 'divide-slate-800/40'}`}>
+                        {row.skippedTeams.map((sTeam, sIdx) => (
+                          <tr key={sIdx} className={`transition-colors ${isBlackAndWhite ? 'hover:bg-slate-100/50 text-slate-850' : 'hover:bg-slate-800/20 text-slate-300'}`}>
+                            <td className="px-4 py-2 font-semibold">{sTeam.teamName}</td>
+                            <td className={`px-4 py-2 text-center font-bold ${isBlackAndWhite ? 'text-slate-900' : 'text-white'}`}>{sTeam.score}</td>
+                            <td className="px-4 py-2 text-center">{sTeam.penalty}</td>
+                            <td className="px-4 py-2 text-right text-slate-450">#{sTeam.originalRank}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+            </div>
+          );
+        })
+        }
 
         {/* Infinite Scroll Sentinel */}
-        {(viewMode === 'standard' || viewMode === 'mist') && visibleStandings.length < filteredStandings.length && (
-          <div 
-            ref={sentinelRef} 
-            className="h-20 flex items-center justify-center text-slate-500 text-sm border-t border-slate-800/40 mt-6"
+        {visibleStandings.length < filteredStandings.length && (
+          <div
+            ref={sentinelRef}
+            className={`h-20 flex items-center justify-center text-slate-500 text-sm border-t mt-6 ${isBlackAndWhite ? 'border-slate-200' : 'border-slate-800/40'}`}
           >
-            <RefreshCw className="h-4 w-4 animate-spin mr-2 text-blue-500" />
+            <RefreshCw className="h-4 w-4 animate-spin mr-2 text-slate-455" />
             Loading more team standings...
           </div>
         )}
 
         {/* Empty States */}
-        {((viewMode === 'standard' || viewMode === 'mist') && filteredStandings.length === 0) && (
-          <div className="text-center py-20 text-slate-500 bg-slate-900/40 rounded-2xl border border-slate-800/80">
+        {filteredStandings.length === 0 && (
+          <div className={`text-center py-20 border ${isBlackAndWhite ? 'bg-white border-slate-200 text-slate-500' : 'bg-slate-900/40 border-slate-800/80 text-slate-500'}`}>
             No results found matching your search criteria.
           </div>
         )}

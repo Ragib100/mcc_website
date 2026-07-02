@@ -20,6 +20,21 @@ async function getAliasesMap(): Promise<Map<string, string>> {
   return aliasMap;
 }
 
+let schemaEnsured = false;
+async function ensureSavedContestsSchema() {
+  if (schemaEnsured) return;
+  try {
+    await sql`
+      ALTER TABLE public.saved_contests 
+      ADD COLUMN IF NOT EXISTS registration_fee INTEGER NOT NULL DEFAULT 0
+    `;
+    schemaEnsured = true;
+    console.log("✅ Database schema ensured: saved_contests has registration_fee column");
+  } catch (err: any) {
+    console.error("❌ Failed to ensure saved_contests schema:", err.message);
+  }
+}
+
 // Helper to replace raw university names in a standings response
 function applyAliasesToStandings(data: any, aliases: Map<string, string>) {
   if (!data || !data.standings) return;
@@ -69,13 +84,19 @@ route.get("/", async (c) => {
   }
   
   try {
+    await ensureSavedContestsSchema();
+
     const result = await sql`
-      SELECT data, saved_at as "savedAt" 
-      FROM saved_standings 
-      WHERE provider = ${provider} AND slug = ${slug}
+      SELECT ss.data, ss.saved_at as "savedAt", sc.registration_fee as "registrationFee"
+      FROM saved_standings ss
+      LEFT JOIN saved_contests sc ON ss.provider = sc.provider AND ss.slug = sc.slug
+      WHERE ss.provider = ${provider} AND ss.slug = ${slug}
     `;
     if (result.length > 0) {
       const data = result[0].data;
+      if (data && data.contest) {
+        data.contest.registrationFee = result[0].registrationFee || 0;
+      }
       
       // Apply university alias mapping
       const aliases = await getAliasesMap();
@@ -286,6 +307,29 @@ route.post("/toggle-publish", async (c) => {
     return c.json({ success: true, published: result[0].published });
   } catch (error: any) {
     console.error("Error toggling publish:", error);
+    return c.json({ error: error.message }, 500);
+  }
+});
+
+// Update registration fee for a contest
+route.post("/update-registration-fee", async (c) => {
+  try {
+    const { provider, slug, registrationFee } = await c.req.json();
+    if (!provider || !slug || registrationFee === undefined) {
+      return c.json({ error: "Missing required fields" }, 400);
+    }
+
+    await ensureSavedContestsSchema();
+
+    await sql`
+      UPDATE saved_contests
+      SET registration_fee = ${registrationFee}
+      WHERE provider = ${provider} AND slug = ${slug}
+    `;
+
+    return c.json({ success: true, message: "Registration fee updated successfully" });
+  } catch (error: any) {
+    console.error("Error updating registration fee:", error);
     return c.json({ error: error.message }, 500);
   }
 });

@@ -9,6 +9,7 @@ export interface UnifiedContest {
   durationMinutes: number;
   published?: boolean;
   isSaved?: boolean;
+  registrationFee?: number;
 }
 
 export interface ProblemStat {
@@ -66,7 +67,7 @@ export function processCustomRanks(rows: UnifiedStandingsRow[]): UnifiedStanding
       row.skippedTeams = [];
       output.push(row);
     } else {
-      if (seenUniversities.has(institutionLower)) {
+      if (institutionLower && seenUniversities.has(institutionLower)) {
         row.displayRank = '-';
         const mainTeam = universityToMainTeam.get(institutionLower);
         if (mainTeam) {
@@ -78,9 +79,11 @@ export function processCustomRanks(rows: UnifiedStandingsRow[]): UnifiedStanding
       } else {
         row.displayRank = currentRank;
         currentRank++;
-        seenUniversities.add(institutionLower);
+        if (institutionLower) {
+          seenUniversities.add(institutionLower);
+          universityToMainTeam.set(institutionLower, row);
+        }
         row.skippedTeams = [];
-        universityToMainTeam.set(institutionLower, row);
         output.push(row);
       }
     }

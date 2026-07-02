@@ -130,7 +130,14 @@ export async function getTophStandings(slug: string): Promise<UnifiedStandingsRe
       
       const teamDiv = teamCell.find('div.d-flex > div');
       const institution = teamDiv.find('.adjunct').text().trim();
-      const teamName = teamDiv.clone().children().remove().end().text().trim();
+      
+      let teamName = '';
+      const link = teamDiv.find('a');
+      if (link.length > 0) {
+        teamName = link.first().text().trim();
+      } else {
+        teamName = teamDiv.clone().children().remove().end().text().trim();
+      }
       
       const scoreCell = $(tds[2]);
       const score = parseInt(scoreCell.find('strong').text().trim(), 10) || 0;

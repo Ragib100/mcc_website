@@ -12,7 +12,7 @@ export default async function PublicContestsPage() {
   const contests = await getPublishedContests();
 
   return (
-    <div className="min-h-screen bg-[#0b0f19] text-slate-100 antialiased py-10">
+    <div className="min-h-screen bg-slate-50 dark:bg-[#0b0f19] text-slate-900 dark:text-slate-100 antialiased py-10 transition-colors duration-300">
       <div className="container mx-auto px-4 max-w-[1400px]">
         <PublicContestsClient contests={contests} />
       </div>

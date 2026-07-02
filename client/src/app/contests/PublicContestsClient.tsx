@@ -20,12 +20,12 @@ export default function PublicContestsClient({ contests }: { contests: UnifiedCo
   return (
     <div className="space-y-8">
       {/* Header section with modern design */}
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center border-b border-slate-800/60 pb-8 gap-6">
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center border-b border-slate-200 dark:border-slate-800/60 pb-8 gap-6">
         <div>
-          <h1 className="text-4xl font-extrabold tracking-tight text-transparent bg-clip-text bg-gradient-to-r from-white via-slate-100 to-slate-400">
+          <h1 className="text-4xl font-extrabold tracking-tight text-slate-950 dark:text-transparent dark:bg-clip-text dark:bg-gradient-to-r dark:from-white dark:via-slate-100 dark:to-slate-400">
             Programming Contests
           </h1>
-          <p className="text-sm text-slate-400 mt-2">
+          <p className="text-sm text-slate-500 dark:text-slate-400 mt-2">
             Explore archived contests and view university leaderboards.
           </p>
         </div>
@@ -41,19 +41,19 @@ export default function PublicContestsClient({ contests }: { contests: UnifiedCo
 
       {/* Search Filter Box */}
       <div className="relative max-w-md">
-        <Search className="absolute left-4.5 top-1/2 -translate-y-1/2 h-4.5 w-4.5 text-slate-500" />
+        <Search className="absolute left-4.5 top-1/2 -translate-y-1/2 h-4.5 w-4.5 text-slate-400 dark:text-slate-500" />
         <input
           type="text"
           placeholder="Search contests by title..."
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          className="w-full pl-12 pr-5 py-3.5 bg-slate-900/60 backdrop-blur border border-slate-800/80 rounded-2xl text-white placeholder-slate-500 focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500/50 outline-none transition-all text-sm shadow-inner"
+          className="w-full pl-12 pr-5 py-3.5 bg-white dark:bg-slate-900/60 backdrop-blur border border-slate-300 dark:border-slate-800/80 rounded-2xl text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-slate-500 focus:ring-2 focus:ring-slate-100 dark:focus:ring-blue-500/40 focus:border-slate-450 dark:focus:border-blue-500/50 outline-none transition-all text-sm shadow-inner"
         />
       </div>
 
       {/* Grid of contests */}
       {filteredContests.length === 0 ? (
-        <div className="text-center py-20 text-slate-500 bg-slate-900/20 backdrop-blur rounded-3xl border border-slate-800/60">
+        <div className="text-center py-20 text-slate-500 bg-white dark:bg-slate-900/20 backdrop-blur rounded-3xl border border-slate-200 dark:border-slate-800/60">
           No published contests found.
         </div>
       ) : (
@@ -62,25 +62,25 @@ export default function PublicContestsClient({ contests }: { contests: UnifiedCo
             <Link 
               key={`${contest.provider}-${contest.slug}`}
               href={`/contests/${contest.provider}/${contest.slug}`}
-              className="bg-slate-900/40 backdrop-blur rounded-2xl border border-slate-800/80 p-6 transition-all duration-300 hover:border-slate-700/50 hover:bg-slate-900/60 hover:scale-[1.01] shadow-lg shadow-slate-950/15 flex flex-col h-full group"
+              className="bg-white dark:bg-slate-900/40 backdrop-blur rounded-2xl border border-slate-200 dark:border-slate-800/80 p-6 transition-all duration-300 hover:border-slate-300 hover:bg-slate-50/50 dark:hover:border-slate-700/50 dark:hover:bg-slate-900/60 hover:scale-[1.01] shadow-md dark:shadow-lg shadow-slate-250/40 dark:shadow-slate-950/15 flex flex-col h-full group"
             >
               <div className="flex justify-between items-start mb-5">
                 <span className={`px-3 py-1 text-xs font-bold rounded-full ${
                   contest.provider === 'baps' 
-                    ? 'bg-blue-500/10 text-blue-400 border border-blue-500/20' 
-                    : 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
+                    ? 'bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20' 
+                    : 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20'
                 }`}>
                   {contest.provider.toUpperCase()} OJ
                 </span>
               </div>
               
-              <h2 className="text-lg font-bold text-white mb-4 line-clamp-2 leading-snug group-hover:text-blue-400 transition-colors">
+              <h2 className="text-lg font-bold text-slate-900 dark:text-white mb-4 line-clamp-2 leading-snug group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors">
                 {contest.title}
               </h2>
               
-              <div className="mt-auto space-y-2.5 text-xs text-slate-400 pt-4 border-t border-slate-800/40">
+              <div className="mt-auto space-y-2.5 text-xs text-slate-500 dark:text-slate-400 pt-4 border-t border-slate-200 dark:border-slate-800/40">
                 <div className="flex items-center gap-2.5">
-                  <Calendar className="h-4 w-4 text-slate-500" />
+                  <Calendar className="h-4 w-4 text-slate-400 dark:text-slate-500" />
                   <span>{new Date(contest.startsAt).toLocaleString('en-US', {
                     month: 'short',
                     day: 'numeric',

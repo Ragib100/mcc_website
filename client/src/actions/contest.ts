@@ -559,3 +559,33 @@ export async function getPublishedContests(): Promise<UnifiedContest[]> {
     return [];
   }
 }
+
+export async function updateContestRegistrationFee(
+  provider: string,
+  slug: string,
+  registrationFee: number
+): Promise<{ success: boolean; message: string }> {
+  try {
+    const res = await fetch(`${API}/saved-standings/update-registration-fee`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ provider, slug, registrationFee }),
+    });
+
+    if (res.ok) {
+      const data = await res.json();
+      if (data.success) {
+        revalidatePath(`/admin/contests/${provider}/${slug}`);
+        revalidatePath(`/contests/${provider}/${slug}`);
+        return { success: true, message: 'Registration fee updated successfully' };
+      }
+      return { success: false, message: data.error || 'Failed to update registration fee' };
+    }
+    return { success: false, message: 'Failed to connect to server' };
+  } catch (err: any) {
+    console.error('Error updating registration fee', err);
+    return { success: false, message: err.message || 'An error occurred' };
+  }
+}

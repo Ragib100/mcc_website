@@ -54,9 +54,42 @@ export default function StandingsClient({ data }: { data: UnifiedStandingsRespon
 
   const standingsWithUniqueRank = useMemo(() => {
     return data.standings.map((row, idx) => {
+      const isMist = isMistTeam(row.teamName, row.institution);
+      let uniqueUniRank = idx + 1;
+      if (isMist) {
+        // Find the first non-MIST team after this index
+        let nextNonMist = null;
+        for (let j = idx + 1; j < data.standings.length; j++) {
+          if (!isMistTeam(data.standings[j].teamName, data.standings[j].institution)) {
+            nextNonMist = data.standings[j];
+            break;
+          }
+        }
+        if (nextNonMist) {
+          const nextRank = typeof nextNonMist.displayRank === 'number'
+            ? nextNonMist.displayRank
+            : parseInt(nextNonMist.displayRank as string, 10);
+          uniqueUniRank = isNaN(nextRank) ? (idx + 1) : nextRank;
+        } else {
+          // Find the last non-MIST team before this index
+          let prevNonMist = null;
+          for (let j = idx - 1; j >= 0; j--) {
+            if (!isMistTeam(data.standings[j].teamName, data.standings[j].institution)) {
+              prevNonMist = data.standings[j];
+              break;
+            }
+          }
+          if (prevNonMist) {
+            const prevRank = typeof prevNonMist.displayRank === 'number'
+              ? prevNonMist.displayRank
+              : parseInt(prevNonMist.displayRank as string, 10);
+            uniqueUniRank = isNaN(prevRank) ? (idx + 1) : (prevRank + 1);
+          }
+        }
+      }
       return {
         ...row,
-        uniqueUniRank: idx + 1
+        uniqueUniRank
       };
     });
   }, [data.standings]);
@@ -97,7 +130,7 @@ export default function StandingsClient({ data }: { data: UnifiedStandingsRespon
 
       let percentage = matchedRule ? matchedRule.defaultPercentage : 50;
 
-      if (matchedRule && matchedRule.brackets) {
+      if (item.row.score > 0 && matchedRule && matchedRule.brackets) {
         const bracket = matchedRule.brackets.find((b: any) => uniqueRank <= b.limit);
         if (bracket) {
           percentage = bracket.percentage;
@@ -181,7 +214,9 @@ export default function StandingsClient({ data }: { data: UnifiedStandingsRespon
 
     filteredStandings.forEach((row, i) => {
       const rowData = [
-        viewMode === 'mist' || viewMode === 'sponsorship' ? row.uniqueUniRank : row.displayRank,
+        row.score === 0
+          ? '∞'
+          : (viewMode === 'mist' || viewMode === 'sponsorship' ? row.uniqueUniRank : row.displayRank),
         `"${row.teamName.replace(/"/g, '""')}"`,
         `"${row.institution.replace(/"/g, '""')}"`,
         row.score,
@@ -783,10 +818,10 @@ export default function StandingsClient({ data }: { data: UnifiedStandingsRespon
                       Unique University Rank
                     </span>
                     <span className={`text-2xl font-black mt-0.5 lg:mt-1 ${isBlackAndWhite ? 'text-slate-900' : 'text-white'}`}>
-                      {row.uniqueUniRank}
+                      {row.score === 0 ? '∞' : row.uniqueUniRank}
                     </span>
                     <span className={`text-[10px] font-semibold mt-1 opacity-80 ${isBlackAndWhite ? 'text-slate-500' : 'text-slate-400'}`}>
-                      Overall Rank: #{row.originalRank}
+                      Overall Rank: #{row.score === 0 ? '∞' : row.originalRank}
                     </span>
                   </div>
 
@@ -864,7 +899,7 @@ export default function StandingsClient({ data }: { data: UnifiedStandingsRespon
                     {viewMode === 'mist' ? 'Unique University Rank' : 'Rank'}
                   </span>
                   <span className={`text-2xl font-black mt-0.5 lg:mt-1 ${isBlackAndWhite ? 'text-slate-900' : 'text-white'}`}>
-                    {viewMode === 'mist' ? row.uniqueUniRank : row.displayRank}
+                    {row.score === 0 ? '∞' : (viewMode === 'mist' ? row.uniqueUniRank : row.displayRank)}
                   </span>
                 </div>
 
@@ -976,7 +1011,7 @@ export default function StandingsClient({ data }: { data: UnifiedStandingsRespon
                             <td className="px-4 py-2 font-semibold">{sTeam.teamName}</td>
                             <td className={`px-4 py-2 text-center font-bold ${isBlackAndWhite ? 'text-slate-900' : 'text-white'}`}>{sTeam.score}</td>
                             <td className="px-4 py-2 text-center">{sTeam.penalty}</td>
-                            <td className="px-4 py-2 text-right text-slate-450">#{sTeam.originalRank}</td>
+                            <td className="px-4 py-2 text-right text-slate-450">#{sTeam.score === 0 ? '∞' : sTeam.originalRank}</td>
                           </tr>
                         ))}
                       </tbody>

@@ -651,7 +651,7 @@ async function page({ params, searchParams }) {
                       type="number"
                       name="weight"
                       min="0"
-                      step="0.1"
+                      step="0.01"
                       placeholder="Weight"
                       defaultValue={contest.weight}
                       className="pl-10 h-9 rounded-full border-slate-200 dark:border-slate-800"

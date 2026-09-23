@@ -160,7 +160,7 @@ describe('buildScoredContestReport', () => {
     expect(report.users[0].scoreTrace.penaltyScoreFormula).toBe('sum(penalty) + sum(demerits)');
   });
 
-  test('applies contest weight to penalty before the final penalty score', () => {
+  test('applies a two-decimal contest weight to scores and penalty before final scoring', () => {
     const report = buildScoredContestReport({
       roomId: 'room-1',
       scope: 'global',
@@ -168,7 +168,7 @@ describe('buildScoredContestReport', () => {
         itemId: 'item-1',
         contestKey: 'c101',
         formulaKey: 'alpha',
-        weight: 2,
+        weight: 1.25,
         teams: [team('alice', 3, 30, 40)],
       })],
       config: {
@@ -178,8 +178,10 @@ describe('buildScoredContestReport', () => {
       },
     });
 
-    expect(report.users[0].contests.alpha.penalty).toBe(80);
-    expect(report.users[0].penaltyScore).toBe(80);
+    expect(report.users[0].contests.alpha.sourceBreakdown.c101.weight).toBe(1.25);
+    expect(report.users[0].contests.alpha.finalScore).toBe(37.5);
+    expect(report.users[0].contests.alpha.penalty).toBe(50);
+    expect(report.users[0].penaltyScore).toBe(50);
   });
 
   test('applies ordered field adjustments before final formulas and traces each change', () => {

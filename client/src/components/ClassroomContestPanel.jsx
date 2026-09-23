@@ -2189,7 +2189,7 @@ export function ClassroomContestPanel({
                       id="contest-weight"
                       type="number"
                       min="0"
-                      step="0.1"
+                      step="0.01"
                       value={contestForm.weight}
                       onChange={(event) => setContestForm((form) => ({ ...form, weight: event.target.value }))}
                     />
